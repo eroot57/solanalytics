@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Wallet Portfolio Analyzer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/solana-web3.js/1.73.0/index.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.3.4/axios.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 {
+            color: #3b5998;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+            font-family: monospace;
+        }
+        button {
+            background-color: #9945FF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #7D3AC1;
+        }
+        #results {
+            margin-top: 20px;
+            border-top: 1px solid #ddd;
+            padding-top: 20px;
+        }
+        .wallet-result {
+            background-color: #f5f5f5;
+            border-left: 4px solid #9945FF;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+        }
+        .asset-item {
+            margin: 5px 0;
+            padding: 5px 10px;
+            background-color: #eef2ff;
+            border-radius: 4px;
+        }
+        .loading {
+            text-align: center;
+            margin: 20px 0;
+            color: #666;
+        }
+        .status-bar {
+            height: 6px;
+            width: 100%;
+            background-color: #eee;
+            border-radius: 3px;
+            margin-top: 10px;
+        }
+        .status-progress {
+            height: 100%;
+            width: 0%;
+            background-color: #9945FF;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+        .error {
+            color: #d9534f;
+            margin: 10px 0;
+        }
+        .header-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .rpc-input {
+            flex: 1;
+            max-width: 500px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-container">
+            <h1>Solana Wallet Portfolio Analyzer</h1>
+            <div>
+                <label for="rpcUrl">RPC URL:</label>
+                <input type="text" id="rpcUrl" class="rpc-input" value="https://api.mainnet-beta.solana.com">
+            </div>
+        </div>
+        
+        <p>Enter Solana wallet addresses or private keys (one per line):</p>
+        <textarea id="walletInput" placeholder="Enter wallet addresses or private keys here (one per line)"></textarea>
+        
+        <div>
+            <button id="analyzeButton">Analyze Wallets</button>
+            <button id="clearButton">Clear Results</button>
+        </div>
+        
+        <div class="status-bar">
+            <div id="progressBar" class="status-progress"></div>
+        </div>
+        
+        <div id="status"></div>
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // Configuration
+        const SOL_MINT = "So11111111111111111111111111111111111111112";
+        const JUPITER_PRICE_API_BASE = "https://price.jup.ag/v4/price";
+        const HELLO_MOON_API_URL = "https://rest-api.hellomoon.io/v0/defi/user-positions";
+        const HELLO_MOON_API_KEY = "dcc501a2-187a-469b-af8c-1d8c92c18ac8";
+        const IRYS_BALANCE_API = "https://node1.irys.xyz/account/balance/solana";
+        
+        // Define a connection variable to be initialized later
+        let connection;
+        
+        // Initialize connection with the provided RPC URL
+        function initConnection() {
+            const rpcUrl = document.getElementById('rpcUrl').value.trim();
+            if (!rpcUrl) {
+                updateStatus("Error: Please provide a valid RPC URL", true);
+                return false;
+            }
+            
+            try {
+                connection = new solanaWeb3.Connection(rpcUrl);
+                return true;
+            } catch (error) {
+                updateStatus(`Error initializing connection: ${error.message}`, true);
+                return false;
+            }
+        }
+        
+        // Update status with message
+        function updateStatus(message, isError = false) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = message;
+            statusDiv.className = isError ? 'error' : '';
+        }
+        
+        // Update progress bar
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = `${percent}%`;
+        }
+        
+        // Add result to the results div
+        function addResult(walletAddress, walletKey, resultData) {
+            const resultsDiv = document.getElementById('results');
+            
+            // Create wallet result container
+            const walletDiv = document.createElement('div');
+            walletDiv.className = 'wallet-result';
+            
+            // Add wallet address heading
+            const walletHeading = document.createElement('h3');
+            walletHeading.textContent = `Wallet: ${walletAddress}`;
+            if (walletKey !== walletAddress) {
+                walletHeading.textContent += ` (Key: ${walletKey.substring(0, 4)}...${walletKey.substring(walletKey.length - 4)})`;
+            }
+            walletDiv.appendChild(walletHeading);
+            
+            // Add asset information if the wallet has assets
+            if (resultData && Object.keys(resultData).length > 0) {
+                for (const [assetType, assetInfo] of Object.entries(resultData)) {
+                    const assetDiv = document.createElement('div');
+                    assetDiv.className = 'asset-item';
+                    
+                    // Format asset information based on type
+                    let assetText = '';
+                    if (assetType === 'SOL') {
+                        assetText = `SOL: ${assetInfo.balance.toFixed(5)} (≈$${(assetInfo.value || 0).toFixed(2)})`;
+                    } else if (assetType === 'TOKENS') {
+                        assetText = `Tokens: ${assetInfo.count} tokens found`;
+                        if (assetInfo.items && assetInfo.items.length > 0) {
+                            assetText += '<ul>';
+                            assetInfo.items.slice(0, 5).forEach(token => {
+                                assetText += `<li>${token.symbol || 'Unknown'}: ${token.amount.toFixed(4)} (≈$${(token.value || 0).toFixed(2)})</li>`;
+                            });
+                            if (assetInfo.items.length > 5) {
+                                assetText += `<li>...and ${assetInfo.items.length - 5} more tokens</li>`;
+                            }
+                            assetText += '</ul>';
+                        }
+                    } else if (assetType === 'DEFI') {
+                        assetText = `DeFi Positions: ${assetInfo.count} (≈$${(assetInfo.totalValue || 0).toFixed(2)})`;
+                        if (assetInfo.protocols) {
+                            assetText += '<ul>';
+                            for (const [protocol, count] of Object.entries(assetInfo.protocols)) {
+                                assetText += `<li>${protocol}: ${count} positions</li>`;
+                            }
+                            assetText += '</ul>';
+                        }
+                    } else if (assetType === 'PROGRAMS') {
+                        assetText = `Programs: ${assetInfo.count} programs owned`;
+                    } else if (assetType === 'CANDY_MACHINES') {
+                        assetText = `Candy Machines: ${assetInfo.count} machines owned`;
+                    } else if (assetType === 'BUFFERS') {
+                        assetText = `Program Buffers: ${assetInfo.count} buffers owned`;
+                    } else if (assetType === 'STORAGE') {
+                        assetText = `Irys Storage: ${assetInfo.balance} bytes`;
+                    } else if (assetType === 'TOTAL') {
+                        assetText = `<strong>Total Estimated Value: $${assetInfo.value.toFixed(2)}</strong>`;
+                    }
+                    
+                    assetDiv.innerHTML = assetText;
+                    walletDiv.appendChild(assetDiv);
+                }
+            } else {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.className = 'asset-item';
+                emptyDiv.textContent = 'No assets found for this wallet.';
+                walletDiv.appendChild(emptyDiv);
+            }
+            
+            resultsDiv.appendChild(walletDiv);
+        }
+        
+        // Fetch SOL Balance
+        async function getSolBalance(walletAddress) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(walletAddress);
+                const balance = await connection.getBalance(publicKey);
+                return balance / 1e9; // Convert lamports to SOL
+            } catch (error) {
+                console.error('Error fetching SOL balance:', error);
+                return 0;
+            }
+        }
+        
+        // Fetch SPL Tokens
+        async function getSplTokens(walletAddress) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(walletAddress);
+                const tokenProgramId = new solanaWeb3.PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+                
+                const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+                    publicKey, 
+                    { programId: tokenProgramId }
+                );
+                
+                return tokenAccounts.value
+                    .filter(({ account }) => account.data.parsed.info.tokenAmount.uiAmount > 0)
+                    .map(({ account }) => ({
+                        mint: account.data.parsed.info.mint,
+                        amount: account.data.parsed.info.tokenAmount.uiAmount
+                    }));
+            } catch (error) {
+                console.error('Error fetching SPL tokens:', error);
+                return [];
+            }
+        }
+        
+        // Get DeFi positions
+        async function getDefiPositions(walletAddress) {
+            try {
+                const response = await axios.post(
+                    HELLO_MOON_API_URL,
+                    { pubkey: walletAddress },
+                    {
+                        headers: {
+                            'accept': 'application/json',
+                            'authorization': `Bearer ${HELLO_MOON_API_KEY}`,
+                            'content-type': 'application/json'
+                        }
+                    }
+                );
+                
+                if (!response.data || !response.data.data || !response.data.data[0] || !response.data.data[0].asset_data) {
+                    return { positions: [], protocolSummary: {} };
+                }
+                
+                const positions = response.data.data[0].asset_data;
+                const protocolSummary = positions.reduce((summary, position) => {
+                    const protocol = position.protocol;
+                    summary[protocol] = (summary[protocol] || 0) + 1;
+                    return summary;
+                }, {});
+                
+                return { positions, protocolSummary };
+            } catch (error) {
+                console.error('Error fetching DeFi positions:', error);
+                return { positions: [], protocolSummary: {} };
+            }
+        }
+        
+        // Get Candy Machines and Bubblegum Accounts
+        async function getCandyMachinesAndBubblegum(walletAddress) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(walletAddress);
+                const accounts = [];
+                
+                // Candy Machine Program IDs
+                const candyMachineProgramIds = {
+                    v1: new solanaWeb3.PublicKey('cndyAnrLdpjq1Ssp1z8xxDsB8dxe7u4HL5Nxi2K5WXZ'),
+                    v2: new solanaWeb3.PublicKey('cndy3Z4yapfJBmL3ShUp5exZKqR3z33thTzeNMm2gRZ'),
+                    v3: new solanaWeb3.PublicKey('CndyV3LdqHUfDLmE5naZjVN8rBZz4tqhdefbAnjHG3JR')
+                };
+                
+                // Bubblegum Program Address
+                const bubblegumProgramId = new solanaWeb3.PublicKey('BGUMAp9Gq7iTEuizy4t6yJ5SLRkd3tS5d5ztMsRrwjQa');
+                
+                // Candy Machine detection
+                for (const [version, programId] of Object.entries(candyMachineProgramIds)) {
+                    try {
+                        const candyMachineAccounts = await connection.getParsedProgramAccounts(
+                            programId,
+                            {
+                                filters: [
+                                    {
+                                        memcmp: {
+                                            offset: 8,
+                                            bytes: publicKey.toBase58()
+                                        }
+                                    }
+                                ]
+                            }
+                        );
+                        
+                        accounts.push(...candyMachineAccounts.map(account => ({
+                            type: `Candy Machine V${version}`,
+                            pubkey: account.pubkey.toBase58()
+                        })));
+                    } catch (error) {
+                        console.error(`Error fetching Candy Machines V${version}:`, error.message);
+                    }
+                }
+                
+                // Bubblegum account detection
+                try {
+                    const bubblegumAccounts = await connection.getParsedProgramAccounts(
+                        bubblegumProgramId,
+                        {
+                            filters: [
+                                {
+                                    memcmp: {
+                                        offset: 8,
+                                        bytes: publicKey.toBase58()
+                                    }
+                                }
+                            ]
+                        }
+                    );
+                    
+                    accounts.push(...bubblegumAccounts.map(account => ({
+                        type: 'Bubblegum',
+                        pubkey: account.pubkey.toBase58()
+                    })));
+                } catch (error) {
+                    console.error('Error fetching Bubblegum accounts:', error.message);
+                }
+                
+                return accounts;
+            } catch (error) {
+                console.error('Error fetching Candy Machines and Bubblegum accounts:', error);
+                return [];
+            }
+        }
+        
+        // Get Owned Programs
+        async function getOwnedPrograms(walletAddress) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(walletAddress);
+                const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new solanaWeb3.PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
+                
+                const accounts = await connection.getParsedProgramAccounts(
+                    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+                    {
+                        filters: [
+                            {
+                                memcmp: {
+                                    offset: 32,  // Authority field
+                                    bytes: publicKey.toBase58()
+                                }
+                            }
+                        ]
+                    }
+                );
+                
+                return accounts.map(account => ({
+                    pubkey: account.pubkey.toBase58(),
+                    type: 'Program'
+                }));
+            } catch (error) {
+                console.error('Error fetching owned programs:', error.message);
+                return [];
+            }
+        }
+        
+        // Get Owned Buffers
+        async function getOwnedBuffers(walletAddress) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(walletAddress);
+                const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new solanaWeb3.PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
+                
+                const accounts = await connection.getParsedProgramAccounts(
+                    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
+                    {
+                        filters: [
+                            {
+                                memcmp: {
+                                    offset: 105,  // Offset where buffer authority is stored
+                                    bytes: publicKey.toBase58()
+                                }
+                            }
+                        ]
+                    }
+                );
+                
+                return accounts.map(account => ({
+                    pubkey: account.pubkey.toBase58(),
+                    type: 'Buffer'
+                }));
+            } catch (error) {
+                console.error('Error fetching owned buffers:', error.message);
+                return [];
+            }
+        }
+        
+        // Get Solana storage balance from Irys
+        async function getIrysStorageBalance(walletAddress) {
+            try {
+                const url = `${IRYS_BALANCE_API}?address=${walletAddress}`;
+                const response = await axios.get(url);
+                
+                if (response.data && typeof response.data.balance === 'number') {
+                    return response.data.balance;
+                }
+                return 0;
+            } catch (error) {
+                console.error('Error fetching Irys storage balance:', error.message);
+                return 0;
+            }
+        }
+        
+        // Get token prices from Jupiter
+        async function getTokenPrices(mints) {
+            try {
+                if (mints.length === 0) return {};
+                
+                // Construct the query string with token IDs
+                const idsParam = mints.join(',');
+                const url = `${JUPITER_PRICE_API_BASE}?ids=${idsParam}`;
+                
+                const response = await axios.get(url);
+                
+                if (!response.data.data) {
+                    console.error("Invalid price data received:", response.data);
+                    return { [SOL_MINT]: { price: 100, symbol: "SOL" } }; // Fallback with SOL price
+                }
+                
+                // Handle case where Jupiter returns empty object or unexpected format
+                if (Object.keys(response.data.data).length === 0 || !response.data.data[SOL_MINT]) {
+                    console.log("Price API returned empty data or missing SOL price, using fallback values");
+                    return { 
+                        ...response.data.data,
+                        [SOL_MINT]: { price: 100, symbol: "SOL" } // Add fallback SOL price
+                    };
+                }
+                
+                return response.data.data;
+            } catch (error) {
+                console.error("Error fetching prices:", error);
+                // Return at least the SOL price as fallback
+                return { [SOL_MINT]: { price: 100, symbol: "SOL" } };
+            }
+        }
+        
+        // Check if a wallet is valid
+        async function isValidWallet(address) {
+            try {
+                const publicKey = new solanaWeb3.PublicKey(address);
+                const response = await connection.getAccountInfo(publicKey);
+                return { valid: true, exists: response !== null };
+            } catch (error) {
+                return { valid: false, exists: false };
+            }
+        }
+        
+        // Calculate portfolio value for a wallet
+        async function calculatePortfolioValue(walletAddress, walletKey) {
+            try {
+                console.log(`Analyzing wallet: ${walletAddress}`);
+                updateStatus(`Analyzing wallet: ${walletAddress}...`);
+                
+                // Get wallet data in parallel
+                const [
+                    solBalance, 
+                    splTokens, 
+                    defiData, 
+                    candyMachines, 
+                    ownedPrograms, 
+                    ownedBuffers,
+                    irysBalance
+                ] = await Promise.all([
+                    getSolBalance(walletAddress),
+                    getSplTokens(walletAddress),
+                    getDefiPositions(walletAddress),
+                    getCandyMachinesAndBubblegum(walletAddress),
+                    getOwnedPrograms(walletAddress),
+                    getOwnedBuffers(walletAddress),
+                    getIrysStorageBalance(walletAddress)
+                ]);
+                
+                // Collect all token mints to fetch prices
+                let tokenMints = [...splTokens.map(token => token.mint)];
+                if (!tokenMints.includes(SOL_MINT)) tokenMints.push(SOL_MINT);
+                
+                // Add DeFi token mints
+                defiData.positions.forEach(position => {
+                    if (position.tokenA) tokenMints.push(position.tokenA);
+                    if (position.tokenB) tokenMints.push(position.tokenB);
+                });
+                
+                // Remove duplicates
+                const uniqueMints = [...new Set(tokenMints)];
+                
+                // Get token prices
+                const prices = await getTokenPrices(uniqueMints);
+                
+                // Calculate SOL value
+                const solPrice = prices[SOL_MINT]?.price || 100; // Fallback to 100 if API fails
+                const solValue = solBalance * solPrice;
+                
+                // Calculate token values
+                const tokenDetails = splTokens.map(token => {
+                    const price = prices[token.mint]?.price || 0;
+                    const value = token.amount * price;
+                    return {
+                        mint: token.mint,
+                        amount: token.amount,
+                        symbol: prices[token.mint]?.symbol || "Unknown",
+                        price: price,
+                        value: value
+                    };
+                });
+                
+                const tokensTotalValue = tokenDetails.reduce((sum, token) => sum + token.value, 0);
+                
+                // Calculate DeFi position values
+                const defiPositionsWithValues = defiData.positions.map(position => {
+                    const tokenAPrice = prices[position.tokenA]?.price || 0;
+                    const tokenBPrice = prices[position.tokenB]?.price || 0;
+                    
+                    // Ensure tokenAmounts are parsed correctly as numbers
+                    const tokenAmountA = typeof position.tokenAmountA === 'string' ? 
+                        parseFloat(position.tokenAmountA) : (position.tokenAmountA || 0);
+                    const tokenAmountB = typeof position.tokenAmountB === 'string' ? 
+                        parseFloat(position.tokenAmountB) : (position.tokenAmountB || 0);
+                    
+                    const tokenAValue = tokenAmountA * tokenAPrice;
+                    const tokenBValue = tokenAmountB * tokenBPrice;
+                    const totalPositionValue = tokenAValue + tokenBValue;
+                    
+                    return {
+                        ...position,
+                        tokenAPrice,
+                        tokenBPrice,
+                        tokenAValue,
+                        tokenBValue,
+                        totalPositionValue
+                    };
+                });
+                
+                const totalDefiValue = defiPositionsWithValues.reduce((sum, position) => sum + position.totalPositionValue, 0);
+                
+                // Calculate final total value
+                const totalValue = Number(solValue) + Number(tokensTotalValue) + Number(totalDefiValue);
+                
+                // Prepare result object
+                const result = {};
+                let hasAssets = false;
+                
+                if (solBalance > 0) {
+                    result.SOL = { balance: solBalance, price: solPrice, value: solValue };
+                    hasAssets = true;
+                }
+                
+                if (splTokens.length > 0) {
+                    result.TOKENS = { 
+                        count: splTokens.length, 
+                        items: tokenDetails,
+                        totalValue: tokensTotalValue
+                    };
+                    hasAssets = true;
+                }
+                
+                if (defiPositionsWithValues.length > 0) {
+                    result.DEFI = {
+                        count: defiPositionsWithValues.length,
+                        positions: defiPositionsWithValues,
+                        protocols: defiData.protocolSummary,
+                        totalValue: totalDefiValue
+                    };
+                    hasAssets = true;
+                }
+                
+                if (candyMachines.length > 0) {
+                    result.CANDY_MACHINES = { count: candyMachines.length, items: candyMachines };
+                    hasAssets = true;
+                }
+                
+                if (ownedPrograms.length > 0) {
+                    result.PROGRAMS = { count: ownedPrograms.length, items: ownedPrograms };
+                    hasAssets = true;
+                }
+                
+                if (ownedBuffers.length > 0) {
+                    result.BUFFERS = { count: ownedBuffers.length, items: ownedBuffers };
+                    hasAssets = true;
+                }
+                
+                if (irysBalance > 0) {
+                    result.STORAGE = { balance: irysBalance };
+                    hasAssets = true;
+                }
+                
+                if (hasAssets) {
+                    result.TOTAL = { value: totalValue };
+                }
+                
+                return result;
+            } catch (error) {
+                console.error('Error calculating portfolio value:', error);
+                updateStatus(`Error analyzing wallet ${walletAddress}: ${error.message}`, true);
+                return {};
+            }
+        }
+        
+        // Analyze wallets function
+        async function analyzeWallets() {
+            // Reset UI
+            document.getElementById('results').innerHTML = '';
+            updateProgress(0);
+            updateStatus('Initializing...');
+            
+            // Initialize connection
+            if (!initConnection()) {
+                return;
+            }
+            
+            // Get wallet addresses from textarea
+            const input = document.getElementById('walletInput').value.trim();
+            if (!input) {
+                updateStatus('Please enter at least one wallet address or private key.', true);
+                return;
+            }
+            
+            const lines = input.split('\n').filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                updateStatus('Please enter at least one wallet address or private key.', true);
+                return;
+            }
+            
+            updateStatus(`Found ${lines.length} addresses/keys to analyze...`);
+            
+            // Process each wallet
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                updateProgress((i / lines.length) * 100);
+                
+                let walletAddress = line;
+                let walletKey = line;
+                
+                // Check if input is valid
+                const { valid, exists } = await isValidWallet(walletAddress);
+                if (!valid) {
+                    updateStatus(`Invalid wallet address: ${walletAddress}. Skipping...`, true);
+                    continue;
+                }
+                
+                if (!exists) {
+                    updateStatus(`Warning: Wallet ${walletAddress} does not exist on-chain or has zero SOL. Analyzing anyway...`);
+                }
+                
+                // Calculate portfolio value
+                const portfolioData = await calculatePortfolioValue(walletAddress, walletKey);
+                
+                // Add result to the results div
+                addResult(walletAddress, walletKey, portfolioData);
+                
+                // Update progress
+                updateProgress(((i + 1) / lines.length) * 100);
+            }
+            
+            updateStatus(`Analysis complete. Processed ${lines.length} wallets.`);
+            updateProgress(100);
+        }
+        
+        // Add event listeners
+        document.getElementById('analyzeButton').addEventListener('click', analyzeWallets);
+        document.getElementById('clearButton').addEventListener('click', () => {
+            document.getElementById('results').innerHTML = '';
+            updateStatus('');
+            updateProgress(0);
+        });
+    </script>
+</body>
+</html>
