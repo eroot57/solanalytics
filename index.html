@@ -706,8 +706,10 @@ async function analyzeWallets() {
                     const keypair = solanaWeb3.Keypair.fromSecretKey(privateKeyUint8);
                     walletAddress = keypair.publicKey.toString();
                     updateStatus(`Detected array private key. Derived address: ${walletAddress}`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (error) {
                     updateStatus(`Invalid array private key format: ${error.message}. Treating as address.`, true);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                     walletAddress = line;
                 }
             } 
@@ -715,16 +717,20 @@ async function analyzeWallets() {
             else if (line.length >= 87 && line.length <= 89) {
                 try {
                     updateStatus(line)
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                     // Decode base58 string to Uint8Array
                     const privateKeyUint8 = bs58.decode(line);
                     updateStatus(privateKeyUint8);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                     // Create keypair from private key
                     const keypair = solanaWeb3.Keypair.fromSecretKey(privateKeyUint8);
                     walletAddress = keypair.publicKey.toString();
                     updateStatus(`Detected base58 private key. Derived address: ${walletAddress}`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (error) {
                     updateStatus(`Invalid base58 private key: ${error.message}. Treating as address.`, true);
                     walletAddress = line;
+                    await new Promise(resolve => setTimeout(resolve, 5000));
                 }
             } 
             // Otherwise treat as a regular address
@@ -736,11 +742,13 @@ async function analyzeWallets() {
             const { valid, exists } = await isValidWallet(walletAddress);
             if (!valid) {
                 updateStatus(`Invalid wallet address: ${walletAddress}. Skipping...`, true);
+                await new Promise(resolve => setTimeout(resolve, 5000));
                 continue;
             }
             
             if (!exists) {
                 updateStatus(`Warning: Wallet ${walletAddress} does not exist on-chain or has zero SOL. Analyzing anyway...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
             }
             
             // Calculate portfolio value
