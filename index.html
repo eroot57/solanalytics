@@ -103,6 +103,57 @@
             border-radius: 4px;
             margin-left: 10px;
         }
+
+        /* Add to your existing style section */
+.container {
+    margin-bottom: 20px;
+}
+
+.form-group {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+}
+
+.form-group label {
+    width: 180px;
+    font-weight: bold;
+}
+
+.input-field {
+    flex: 1;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.results-container {
+    margin-top: 20px;
+    border-top: 1px solid #ddd;
+    padding-top: 20px;
+}
+
+.button {
+    background-color: #9945FF;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-right: 10px;
+}
+
+.button:hover {
+    background-color: #7D3AC1;
+}
+
+.status {
+    margin: 10px 0;
+    padding: 8px;
+    background-color: #f0f0f0;
+    border-left: 4px solid #9945FF;
+}
     </style>
 </head>
 <body>
@@ -117,6 +168,48 @@
         
         <p>Enter Solana wallet addresses or private keys (one per line):</p>
         <textarea id="walletInput" placeholder="Enter wallet addresses or private keys here (one per line)"></textarea>
+
+        <!-- Add this after the wallet input section -->
+<div class="container">
+    <h2>Sourcegraph Private Key Search</h2>
+    <div class="form-group">
+        <label for="sourcegraphUrl">Sourcegraph URL:</label>
+        <input type="text" id="sourcegraphUrl" class="input-field" value="https://sourcegraph.com" placeholder="https://sourcegraph.com">
+    </div>
+    <div class="form-group">
+        <label for="sourcegraphToken">Sourcegraph Token:</label>
+        <input type="password" id="sourcegraphToken" class="input-field" value="sgp_fd1b4edb60bf82b8_e33884d3830423b7a1db614987aa21dee2de69bd" placeholder="Your Sourcegraph token">
+    </div>
+    <div class="form-group">
+        <label for="searchQuery">Search Query:</label>
+        <input type="text" id="searchQuery" class="input-field" placeholder="repo:github.com/username/repo content:">
+    </div>
+    <div class="form-group">
+        <label for="patternType">Pattern Type:</label>
+        <select id="patternType" class="input-field">
+            <option value="regexp">Regular Expression</option>
+            <option value="literal">Literal</option>
+            <option value="structural">Structural</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="searchRegex">Regex for Private Keys:</label>
+        <input type="text" id="searchRegex" class="input-field" value="\b[1-9A-HJ-NP-Za-km-z]{87,88}\b|\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]" placeholder="Regex pattern for private keys">
+    </div>
+    <div class="form-group">
+        <label for="contextLines">Context Lines:</label>
+        <input type="number" id="contextLines" class="input-field" value="2" min="0" max="5">
+    </div>
+    <div class="form-group">
+        <label for="maxResults">Max Results:</label>
+        <input type="number" id="maxResults" class="input-field" value="100" min="1" max="1000">
+    </div>
+    <button id="searchButton" class="button">Search for Private Keys</button>
+</div>
+
+<div id="searchStatus" class="status"></div>
+<div id="privateKeyResults" class="results-container"></div>
+        
         
         <div>
             <button id="analyzeButton">Analyze Wallets</button>
@@ -158,6 +251,165 @@
                 return false;
             }
         }
+
+        // Add this to your script section
+
+// Function to search for private keys using Sourcegraph Stream API
+async function searchPrivateKeys() {
+    const sourcegraphUrl = document.getElementById('sourcegraphUrl').value.trim();
+    const token = document.getElementById('sourcegraphToken').value.trim();
+    const query = document.getElementById('searchQuery').value.trim();
+    const patternType = document.getElementById('patternType').value;
+    const regex = document.getElementById('searchRegex').value.trim();
+    const contextLines = document.getElementById('contextLines').value;
+    const maxResults = document.getElementById('maxResults').value;
+    
+    if (!sourcegraphUrl || !token || !query) {
+        updateSearchStatus('Please provide Sourcegraph URL, token, and search query.', true);
+        return;
+    }
+    
+    updateSearchStatus('Searching Sourcegraph repositories...');
+    document.getElementById('privateKeyResults').innerHTML = '';
+    
+    try {
+        // Build the complete search query by combining user query with regex
+        const completeQuery = `${query} ${regex}`;
+        
+        // Construct the URL with query parameters
+        const searchUrl = new URL(`${sourcegraphUrl}/.api/search/stream`);
+        searchUrl.searchParams.append('q', completeQuery);
+        searchUrl.searchParams.append('v', 'V2');
+        searchUrl.searchParams.append('t', patternType);
+        searchUrl.searchParams.append('cl', contextLines);
+        searchUrl.searchParams.append('display', maxResults);
+        
+        // Make the streaming request
+        const response = await fetch(searchUrl, {
+            headers: {
+                'Accept': 'text/event-stream',
+                'Authorization': `token ${token}`
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
+        }
+        
+        // Process the streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const privateKeys = new Set();
+        
+        updateSearchStatus('Receiving results...');
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Process complete events in the buffer
+            let eventEnd = buffer.indexOf('\n\n');
+            while (eventEnd > -1) {
+                const eventData = buffer.substring(0, eventEnd);
+                buffer = buffer.substring(eventEnd + 2);
+                
+                // Parse the event data
+                if (eventData.includes('event: match')) {
+                    const dataLine = eventData.split('\n').find(line => line.startsWith('data: '));
+                    if (dataLine) {
+                        try {
+                            const matchData = JSON.parse(dataLine.substring(6));
+                            
+                            // Extract private keys from the match
+                            const extractedKeys = extractPrivateKeys(matchData);
+                            extractedKeys.forEach(key => privateKeys.add(key));
+                            
+                            updateSearchStatus(`Found ${privateKeys.size} potential private keys so far...`);
+                        } catch (e) {
+                            console.error('Error parsing match data:', e);
+                        }
+                    }
+                }
+                
+                eventEnd = buffer.indexOf('\n\n');
+            }
+        }
+        
+        updateSearchStatus(`Search complete. Found ${privateKeys.size} potential private keys.`);
+        
+        // Process all found private keys
+        if (privateKeys.size > 0) {
+            const keysArray = Array.from(privateKeys);
+            document.getElementById('walletInput').value = keysArray.join('\n');
+            
+            updateSearchStatus(`Found ${keysArray.length} potential private keys. Added to wallet input for analysis.`);
+            
+            // Optionally auto-start analysis
+            if (confirm(`Found ${keysArray.length} potential private keys. Analyze them now?`)) {
+                analyzeWallets();
+            }
+        } else {
+            updateSearchStatus('No private keys found in the search results.');
+        }
+        
+    } catch (error) {
+        updateSearchStatus(`Error searching Sourcegraph: ${error.message}`, true);
+        console.error('Sourcegraph search error:', error);
+    }
+}
+
+// Function to extract private keys from match data
+function extractPrivateKeys(matchData) {
+    const keys = new Set();
+    
+    // Process match content
+    if (matchData.body && matchData.body.content) {
+        const content = matchData.body.content;
+        
+        // Extract base58 private keys (87-88 characters)
+        const base58Regex = /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g;
+        const base58Matches = content.match(base58Regex) || [];
+        base58Matches.forEach(key => keys.add(key));
+        
+        // Extract array private keys
+        const arrayRegex = /\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]/g;
+        const arrayMatches = content.match(arrayRegex) || [];
+        arrayMatches.forEach(key => keys.add(key));
+    }
+    
+    // Process matches in ranges
+    if (matchData.body && matchData.body.ranges) {
+        matchData.body.ranges.forEach(range => {
+            if (range.content) {
+                // Extract base58 private keys
+                const base58Regex = /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g;
+                const base58Matches = range.content.match(base58Regex) || [];
+                base58Matches.forEach(key => keys.add(key));
+                
+                // Extract array private keys
+                const arrayRegex = /\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]/g;
+                const arrayMatches = range.content.match(arrayRegex) || [];
+                arrayMatches.forEach(key => keys.add(key));
+            }
+        });
+    }
+    
+    return keys;
+}
+
+// Function to update search status
+function updateSearchStatus(message, isError = false) {
+    const statusDiv = document.getElementById('searchStatus');
+    statusDiv.innerHTML = message;
+    statusDiv.className = isError ? 'error' : 'status';
+}
+
+// Add event listener for the search button
+document.getElementById('searchButton').addEventListener('click', searchPrivateKeys);
+        
         
         // Update status with message
         function updateStatus(message, isError = false) {
