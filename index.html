@@ -750,6 +750,7 @@ async function analyzeWallets() {
             addResult(walletAddress, walletKey, portfolioData);
         } catch (error) {
             updateStatus(`Error processing input "${line.substring(0, 10)}...": ${error.message}`, true);
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
         
         // Update progress
