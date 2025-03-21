@@ -708,9 +708,10 @@ async function analyzeWallets() {
             // Check if it's a base58 private key (typically 88 characters)
             else if (line.length >= 87 && line.length <= 89) {
                 try {
+                    updateStatus(line)
                     // Decode base58 string to Uint8Array
                     const privateKeyUint8 = bs58.decode(line);
-                    console.log(privateKeyUint8);
+                    updateStatus(privateKeyUint8);
                     // Create keypair from private key
                     const keypair = solanaWeb3.Keypair.fromSecretKey(privateKeyUint8);
                     walletAddress = keypair.publicKey.toString();
