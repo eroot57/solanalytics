@@ -746,6 +746,7 @@ async function analyzeWallets() {
         
         // Update progress
         updateProgress(((i + 1) / lines.length) * 100);
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
     updateStatus(`Analysis complete. Processed ${lines.length} inputs.`);
