@@ -693,6 +693,7 @@ async function analyzeWallets() {
         updateStatus(walletKey)
         await new Promise(resolve => setTimeout(resolve, 1000));
         updateStatus(line.length)
+        await new Promise(resolve => setTimeout(resolve, 5000));
         
         try {
             // Check if the input is a JSON array (Uint8Array private key)
