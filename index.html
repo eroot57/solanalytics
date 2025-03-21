@@ -719,7 +719,7 @@ async function analyzeWallets() {
                     updateStatus(line)
                     await new Promise(resolve => setTimeout(resolve, 5000));
                     // Decode base58 string to Uint8Array
-                    const privateKeyUint8 = bs58.decode(line);
+                    const privateKeyUint8 = basex.decode(line);
                     updateStatus(privateKeyUint8);
                     await new Promise(resolve => setTimeout(resolve, 5000));
                     // Create keypair from private key
