@@ -710,6 +710,7 @@ async function analyzeWallets() {
                 try {
                     // Decode base58 string to Uint8Array
                     const privateKeyUint8 = bs58.decode(line);
+                    console.log(privateKeyUint8);
                     // Create keypair from private key
                     const keypair = solanaWeb3.Keypair.fromSecretKey(privateKeyUint8);
                     walletAddress = keypair.publicKey.toString();
