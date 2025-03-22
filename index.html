@@ -260,7 +260,6 @@ async function searchPrivateKeys() {
     const token = document.getElementById('sourcegraphToken').value.trim();
     const query = document.getElementById('searchQuery').value.trim();
     const patternType = document.getElementById('patternType').value;
-    const regex = document.getElementById('searchRegex').value.trim();
     const contextLines = document.getElementById('contextLines').value;
     const maxResults = document.getElementById('maxResults').value;
     
@@ -274,18 +273,10 @@ async function searchPrivateKeys() {
     
     try {
         // Build the complete search query by combining user query with regex
-        const completeQuery = `${query} ${regex}`;
-        
-        // Construct the URL with query parameters
-        const searchUrl = new URL(`${sourcegraphUrl}/.api/search/stream`);
-        searchUrl.searchParams.append('q', completeQuery);
-        searchUrl.searchParams.append('v', 'V2');
-        searchUrl.searchParams.append('t', patternType);
-        searchUrl.searchParams.append('cl', contextLines);
-        searchUrl.searchParams.append('display', maxResults);
+        const completeQuery = `${query}`;
         
         // Make the streaming request
-        const response = await fetch(searchUrl, {
+        const response = await fetch(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
             headers: {
                 'Accept': 'text/event-stream',
                 'Authorization': `token ${token}`
