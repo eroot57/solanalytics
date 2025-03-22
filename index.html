@@ -276,14 +276,14 @@ async function searchPrivateKeys() {
         const completeQuery = `${query}`;
         
         // Make the streaming request
-        const response = await fetch(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
+        const response = await axios.get(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
             headers: {
                 'Accept': 'text/event-stream',
                 'Authorization': `token ${token}`
             }
         });
 
-        updateSearchStatus(JSON.stringify(response));
+        updateSearchStatus(response.data);
         await new Promise(resolve => setTimeout(resolve, 10000));
         if (!response.ok) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
