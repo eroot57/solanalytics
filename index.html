@@ -292,7 +292,7 @@ async function searchPrivateKeys() {
             }
         });
 
-        updateSearchStatus(response.data);
+        updateSearchStatus(JSON.stringify(response));
         await new Promise(resolve => setTimeout(resolve, 10000));
         if (!response.ok) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
