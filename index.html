@@ -284,6 +284,9 @@ async function searchPrivateKeys() {
             }
         });
 
+        updateSearchStatus(response.body);
+        await new Promise(resolve => setTimeout(resolve, 10000));
+
         if (!response.ok) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
         }
@@ -348,8 +351,9 @@ async function searchPrivateKeys() {
         }
         
     } catch (error) {
-        updateSearchStatus(`Error searching Sourcegraph: ${error.message}`, true);
+        updateSearchStatus(`Error searching Sourcegraph: ${error}`, true);
         console.error('Sourcegraph search error:', error);
+        await new Promise(resolve => setTimeout(resolve, 10000));
     }
 }
 
