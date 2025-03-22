@@ -329,7 +329,7 @@ async function searchPrivateKeys() {
         );
         
         // Process the response
-        const searchResults = response.data.data.search.results;
+        const searchResults = response.data.search.results;
         const matchCount = searchResults.matchCount;
         const results = searchResults.results;
         
