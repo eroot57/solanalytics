@@ -253,14 +253,13 @@
             }
         }
 
-        // Add this to your script section
-
-// Function to search for private keys using Sourcegraph Stream API
+// Replace the searchPrivateKeys function with this implementation using GraphQL API
 async function searchPrivateKeys() {
     const sourcegraphUrl = document.getElementById('sourcegraphUrl').value.trim();
     const token = document.getElementById('sourcegraphToken').value.trim();
     const query = document.getElementById('searchQuery').value.trim();
     const patternType = document.getElementById('patternType').value;
+    const searchRegex = document.getElementById('searchRegex').value.trim();
     const contextLines = document.getElementById('contextLines').value;
     const maxResults = document.getElementById('maxResults').value;
     
@@ -274,62 +273,98 @@ async function searchPrivateKeys() {
     
     try {
         // Build the complete search query by combining user query with regex
-        const completeQuery = `${query}`;
+        const completeQuery = `${query} ${searchRegex}`;
         
-        // Make the streaming request
-        const response = await fetch(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
-            headers: {
-                'Accept': 'text/event-stream',
-                'Authorization': `token ${token}`
+        // GraphQL query for searching
+        const graphqlQuery = {
+            query: `
+            query Search($query: String!, $patternType: SearchPatternType!, $limit: Int!) {
+                search(query: $query, patternType: $patternType, version: V2) {
+                    results(first: $limit) {
+                        results {
+                            ... on FileMatch {
+                                repository {
+                                    name
+                                }
+                                file {
+                                    path
+                                    url
+                                }
+                                lineMatches {
+                                    preview
+                                    lineNumber
+                                    offsetAndLengths
+                                    limitHit
+                                }
+                                context {
+                                    lines(linesBefore: ${contextLines}, linesAfter: ${contextLines}) {
+                                        line
+                                        lineNumber
+                                    }
+                                }
+                            }
+                        }
+                        limitHit
+                        matchCount
+                    }
+                }
+            }`,
+            variables: {
+                query: completeQuery,
+                patternType: patternType.toUpperCase(),
+                limit: parseInt(maxResults, 10)
             }
-        });
-
-        updateSearchStatus(JSON.stringify(response));
-        await new Promise(resolve => setTimeout(resolve, 10000));
-
-        if (!response.ok) {
-            throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
-        }
+        };
         
-        // Process the streaming response
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+        // Make the GraphQL request
+        const response = await axios.post(
+            `${sourcegraphUrl}/.api/graphql`,
+            graphqlQuery,
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `token ${token}`
+                }
+            }
+        );
+        
+        // Process the response
+        const searchResults = response.data.data.search.results;
+        const matchCount = searchResults.matchCount;
+        const results = searchResults.results;
+        
+        updateSearchStatus(`Found ${matchCount} matches. Processing results...`);
+        
+        // Extract private keys from results
         const privateKeys = new Set();
         
-        updateSearchStatus('Receiving results...');
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            
-            // Process complete events in the buffer
-            let eventEnd = buffer.indexOf('\n\n');
-            while (eventEnd > -1) {
-                const eventData = buffer.substring(0, eventEnd);
-                buffer = buffer.substring(eventEnd + 2);
+        for (const result of results) {
+            if (result.lineMatches) {
+                // Get full context for each match
+                const contextLines = result.context ? result.context.lines : [];
+                const contextMap = {};
                 
-                // Parse the event data
-                if (eventData.includes('event: match')) {
-                    const dataLine = eventData.split('\n').find(line => line.startsWith('data: '));
-                    if (dataLine) {
-                        try {
-                            const matchData = JSON.parse(dataLine.substring(6));
-                            
-                            // Extract private keys from the match
-                            const extractedKeys = extractPrivateKeys(matchData);
-                            extractedKeys.forEach(key => privateKeys.add(key));
-                            
-                            updateSearchStatus(`Found ${privateKeys.size} potential private keys so far...`);
-                        } catch (e) {
-                            console.error('Error parsing match data:', e);
+                // Create a map of line numbers to content for easy lookup
+                contextLines.forEach(line => {
+                    contextMap[line.lineNumber] = line.line;
+                });
+                
+                // Process each line match
+                for (const match of result.lineMatches) {
+                    // Get the line content
+                    const lineContent = match.preview;
+                    
+                    // Extract potential private keys
+                    extractPrivateKeysFromLine(lineContent, privateKeys);
+                    
+                    // Also check surrounding context lines
+                    const lineNumber = match.lineNumber;
+                    for (let i = lineNumber - parseInt(contextLines); i <= lineNumber + parseInt(contextLines); i++) {
+                        if (contextMap[i] && i !== lineNumber) {
+                            extractPrivateKeysFromLine(contextMap[i], privateKeys);
                         }
                     }
                 }
-                
-                eventEnd = buffer.indexOf('\n\n');
             }
         }
         
@@ -342,6 +377,16 @@ async function searchPrivateKeys() {
             
             updateSearchStatus(`Found ${keysArray.length} potential private keys. Added to wallet input for analysis.`);
             
+            // Create a result display
+            const resultsDiv = document.getElementById('privateKeyResults');
+            const resultsList = document.createElement('div');
+            resultsList.innerHTML = `<h3>Found Private Keys:</h3>
+            <div class="wallet-result">
+                <p>Found ${keysArray.length} potential private keys in ${matchCount} code matches.</p>
+                <p>Keys have been added to the wallet input field above for analysis.</p>
+            </div>`;
+            resultsDiv.appendChild(resultsList);
+            
             // Optionally auto-start analysis
             if (confirm(`Found ${keysArray.length} potential private keys. Analyze them now?`)) {
                 analyzeWallets();
@@ -351,48 +396,34 @@ async function searchPrivateKeys() {
         }
         
     } catch (error) {
-        updateSearchStatus(`Error searching Sourcegraph: ${error}`, true);
+        updateSearchStatus(`Error searching Sourcegraph: ${error.message}`, true);
         console.error('Sourcegraph search error:', error);
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        
+        if (error.response) {
+            console.error('Response data:', error.response.data);
+        }
     }
 }
 
-// Function to extract private keys from match data
-function extractPrivateKeys(matchData) {
+// Helper function to extract private keys from a line of text
+function extractPrivateKeysFromLine(lineContent, keysSet) {
+    if (!lineContent) return;
+    
+    // Extract base58 private keys (87-88 characters)
+    const base58Regex = /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g;
+    const base58Matches = lineContent.match(base58Regex) || [];
+    base58Matches.forEach(key => keysSet.add(key));
+    
+    // Extract array private keys
+    const arrayRegex = /\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]/g;
+    const arrayMatches = lineContent.match(arrayRegex) || [];
+    arrayMatches.forEach(key => keysSet.add(key));
+}
+
+// Replace the old extractPrivateKeys function with this implementation
+function extractPrivateKeys(content) {
     const keys = new Set();
-    
-    // Process match content
-    if (matchData.body && matchData.body.content) {
-        const content = matchData.body.content;
-        
-        // Extract base58 private keys (87-88 characters)
-        const base58Regex = /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g;
-        const base58Matches = content.match(base58Regex) || [];
-        base58Matches.forEach(key => keys.add(key));
-        
-        // Extract array private keys
-        const arrayRegex = /\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]/g;
-        const arrayMatches = content.match(arrayRegex) || [];
-        arrayMatches.forEach(key => keys.add(key));
-    }
-    
-    // Process matches in ranges
-    if (matchData.body && matchData.body.ranges) {
-        matchData.body.ranges.forEach(range => {
-            if (range.content) {
-                // Extract base58 private keys
-                const base58Regex = /\b[1-9A-HJ-NP-Za-km-z]{87,88}\b/g;
-                const base58Matches = range.content.match(base58Regex) || [];
-                base58Matches.forEach(key => keys.add(key));
-                
-                // Extract array private keys
-                const arrayRegex = /\[[ ]*([0-9]{1,3}[ ]*,[ ]*){63}[0-9]{1,3}[ ]*\]/g;
-                const arrayMatches = range.content.match(arrayRegex) || [];
-                arrayMatches.forEach(key => keys.add(key));
-            }
-        });
-    }
-    
+    extractPrivateKeysFromLine(content, keys);
     return keys;
 }
 
