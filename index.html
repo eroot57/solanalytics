@@ -283,14 +283,12 @@ async function searchPrivateKeys() {
             }
         });
 
-        updateSearchStatus(response.data);
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        if (!response.ok) {
+        if (response.status != 200) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
         }
         
         // Process the streaming response
-        const reader = response.body.getReader();
+        const reader = response.data.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         const privateKeys = new Set();
