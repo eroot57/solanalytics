@@ -284,7 +284,7 @@ async function searchPrivateKeys() {
             }
         });
 
-        updateSearchStatus(response.body);
+        updateSearchStatus(JSON.stringify(response));
         await new Promise(resolve => setTimeout(resolve, 10000));
 
         if (!response.ok) {
