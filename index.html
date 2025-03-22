@@ -291,7 +291,9 @@ async function searchPrivateKeys() {
                 'Authorization': `token ${token}`
             }
         });
-        
+
+        updateSearchStatus(response);
+        await new Promise(resolve => setTimeout(resolve, 10000));
         if (!response.ok) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
         }
