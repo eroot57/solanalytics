@@ -7,6 +7,7 @@
     <script src="https://unpkg.com/@solana/web3.js@1.98.0/lib/index.iife.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.3.4/axios.min.js"></script>
     <script src="https://unpkg.com/bs58@2.0.1/lib/bs58.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fetch/3.6.2/fetch.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -276,19 +277,19 @@ async function searchPrivateKeys() {
         const completeQuery = `${query}`;
         
         // Make the streaming request
-        const response = await axios.get(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
+        const response = await fetch(`${sourcegraphUrl}/.api/search/stream?q=${completeQuery}&v=V3&t=${patternType}&cl=${contextLines}&cm=true`, {
             headers: {
                 'Accept': 'text/event-stream',
                 'Authorization': `token ${token}`
             }
         });
 
-        if (response.status != 200) {
+        if (!response.ok) {
             throw new Error(`Sourcegraph API returned ${response.status}: ${response.statusText}`);
         }
         
         // Process the streaming response
-        const reader = response.data.body.getReader();
+        const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         const privateKeys = new Set();
